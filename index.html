@@ -140,7 +140,6 @@ document.getElementById("uploadDevice").addEventListener("click",async()=>{
  try{await writeCloud();cloudReady=true;pendingCloudRows=null;document.getElementById("cloudChoices").style.display="none";setCloudStatus("This device's records now replace the cloud records.");}
  catch(err){setCloudStatus("Upload failed: "+err.message+" Existing cloud records were not intentionally cleared.");}
 });
-supabaseClient.auth.onAuthStateChange((_event,session)=>{handleCloudSession(session).catch(err=>setCloudStatus("Cloud connection issue: "+err.message));});
 supabaseClient.auth.getSession().then(({data,error})=>{if(error)setCloudStatus("Session check failed: "+error.message);else handleCloudSession(data.session).catch(err=>setCloudStatus("Cloud connection issue: "+err.message));});
 
 const keys=['founder','finance','business','tasks','knowledge','ai','legacy'];
