@@ -54,7 +54,21 @@
 <section id="money" class="panel">
 <h2>Financial Command Center</h2>
 <p><strong>Authoritative financial workbook:</strong> <a href="https://docs.google.com/spreadsheets/d/1-GN6RE1KGYodIDgU8t8wYl9Rweh6jEknCkjn2mrcVO0/htmlview" target="_blank" rel="noopener noreferrer">Open MSVM Financial Command Center in Google Sheets</a></p>
-<p class="muted">Use the workbook for all live financial records. It remains the source of truth for transactions, allocations, bills, debts, goals, and dashboard calculations. This website does not yet read live spreadsheet balances. The legacy local finance prototype below is retained for reference only; do not enter live transactions here. No payments or transfers are initiated.</p>
+<p class="muted">Use the workbook for all live financial records. It remains the source of truth for transactions, allocations, bills, debts, goals, and dashboard calculations. The live summary below displays aggregate figures synced from the workbook. The legacy local finance prototype is retained for reference only; do not enter live transactions here. No payments or transfers are initiated.</p>
+<div class="toolbar"><button class="action" id="refreshFinanceSummary" type="button">Refresh live summary</button><span id="financeSyncStatus" class="muted" role="status">Sign in to view your private financial summary.</span></div>
+<div class="grid" id="liveFinanceSummary" aria-live="polite">
+<div class="metric">Cash balance<strong id="liveCash">—</strong></div>
+<div class="metric">Reserved funds<strong id="liveReserved">—</strong></div>
+<div class="metric">Available cash<strong id="liveAvailable">—</strong></div>
+<div class="metric">Cleared income<strong id="liveIncome">—</strong></div>
+<div class="metric">Cleared expenses<strong id="liveExpenses">—</strong></div>
+<div class="metric">Net cash movement<strong id="liveNet">—</strong></div>
+<div class="metric">Pending transactions<strong id="livePending">—</strong></div>
+<div class="metric">Overdue bills<strong id="liveOverdue">—</strong></div>
+<div class="metric">Total debt<strong id="liveDebt">—</strong></div>
+<div class="metric">Savings goal remaining<strong id="liveSavings">—</strong></div>
+</div>
+<p class="muted" id="financeSyncedAt">No summary has been received yet.</p>
 <div class="row"><div class="metric">Legacy recorded income<strong id="incomeTotal">$0.00</strong></div><div class="metric">Legacy recorded expenses<strong id="expenseTotal">$0.00</strong></div><div class="metric">Legacy net recorded<strong id="netTotal">$0.00</strong></div></div>
 <p class="muted">Legacy entries are stored separately in this website and are not included in the authoritative workbook.</p>
 <div id="legacyFinanceNotice" class="muted">Legacy entry form disabled to prevent duplicate financial records. Existing website records are preserved below.</div>
@@ -76,6 +90,7 @@
 </form>
 <div class="toolbar"><button class="action" id="signOut" type="button" style="display:none">Sign out</button></div>
 <p id="cloudStatus" class="muted" role="status">Not connected. Local browser storage remains available.</p>
+<p class="muted">Signed-in account UUID (provide this to the Supabase function setup only): <strong id="accountUuid">Sign in to display</strong></p>
 <div id="cloudChoices" style="display:none">
 <p>Cloud records already exist. Choose which copy should become the starting point on this device.</p>
 <div class="toolbar"><button class="action primary" id="loadCloud" type="button">Load cloud records</button><button class="action" id="uploadDevice" type="button">Replace cloud with this device</button></div>
@@ -91,6 +106,30 @@ const SUPABASE_PUBLISHABLE_KEY="sb_publishable_jlLlBLlhBsCmBjM5uU_PJQ_4CKxTpuW";
 const supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 let cloudUser=null,cloudReady=false,pendingCloudRows=null,syncChain=Promise.resolve();
 const setCloudStatus=(message)=>{document.getElementById("cloudStatus").textContent=message};
+const setFinanceSyncStatus=(message)=>{document.getElementById("financeSyncStatus").textContent=message};
+const clearFinanceSummary=()=>{
+ ["liveCash","liveReserved","liveAvailable","liveIncome","liveExpenses","liveNet","livePending","liveOverdue","liveDebt","liveSavings"].forEach(id=>document.getElementById(id).textContent="—");
+ document.getElementById("financeSyncedAt").textContent="No summary has been received yet.";
+};
+async function loadFinanceSummary(){
+ if(!cloudUser){clearFinanceSummary();setFinanceSyncStatus("Sign in to view your private financial summary.");return;}
+ setFinanceSyncStatus("Loading private financial summary…");
+ const {data,error}=await supabaseClient.from("msvm_finance_summary").select("*").eq("user_id",cloudUser.id).maybeSingle();
+ if(error){setFinanceSyncStatus("Summary unavailable: "+error.message+" (complete the finance sync setup first).");return;}
+ if(!data){clearFinanceSummary();setFinanceSyncStatus("No workbook summary received yet. Complete the secure sync setup and run the first sync.");return;}
+ document.getElementById("liveCash").textContent=money(data.cash_balance);
+ document.getElementById("liveReserved").textContent=money(data.reserved_funds);
+ document.getElementById("liveAvailable").textContent=money(data.available_cash);
+ document.getElementById("liveIncome").textContent=money(data.cleared_income);
+ document.getElementById("liveExpenses").textContent=money(data.cleared_expenses);
+ document.getElementById("liveNet").textContent=money(data.net_cash_movement);
+ document.getElementById("livePending").textContent=String(data.pending_transaction_count);
+ document.getElementById("liveOverdue").textContent=String(data.overdue_bill_count);
+ document.getElementById("liveDebt").textContent=money(data.total_debt);
+ document.getElementById("liveSavings").textContent=money(data.savings_goal_remaining);
+ document.getElementById("financeSyncedAt").textContent="Last workbook sync: "+new Date(data.synced_at).toLocaleString();
+ setFinanceSyncStatus("Live aggregate summary loaded from your private account.");
+}
 const writeCloud=async()=>{
  if(!cloudUser) throw new Error("No signed-in user.");
  const rows=keys.map(module=>({user_id:cloudUser.id,module,record:db[module]}));
@@ -103,9 +142,10 @@ const syncCloud=()=>{
 };
 async function handleCloudSession(session){
  const user=session?.user||null;
- if(!user){cloudUser=null;cloudReady=false;document.getElementById("signOut").style.display="none";document.getElementById("cloudChoices").style.display="none";setCloudStatus("Not signed in. Your records remain saved on this device.");return;}
+ if(!user){cloudUser=null;cloudReady=false;document.getElementById("accountUuid").textContent="Sign in to display";document.getElementById("signOut").style.display="none";document.getElementById("cloudChoices").style.display="none";setCloudStatus("Not signed in. Your records remain saved on this device.");clearFinanceSummary();setFinanceSyncStatus("Sign in to view your private financial summary.");return;}
  if(cloudUser?.id===user.id && (cloudReady||pendingCloudRows)) return;
- cloudUser=user;cloudReady=false;document.getElementById("signOut").style.display="inline-block";
+ cloudUser=user;cloudReady=false;document.getElementById("accountUuid").textContent=user.id;document.getElementById("signOut").style.display="inline-block";
+ loadFinanceSummary().catch(err=>setFinanceSyncStatus("Summary read failed: "+err.message));
  document.getElementById("cloudChoices").style.display="none";
  setCloudStatus("Signed in. Checking your cloud records…");
  const {data,error}=await supabaseClient.from("msvm_records").select("module,record").eq("user_id",user.id);
@@ -125,6 +165,7 @@ document.getElementById("authForm").addEventListener("submit",async e=>{
  if(error){setCloudStatus("Sign-in failed: "+error.message);return;}
  await handleCloudSession(data.session);e.target.reset();
 });
+document.getElementById("refreshFinanceSummary").addEventListener("click",()=>loadFinanceSummary().catch(err=>setFinanceSyncStatus("Summary read failed: "+err.message)));
 document.getElementById("signOut").addEventListener("click",async()=>{
  const {error}=await supabaseClient.auth.signOut();
  if(error)setCloudStatus("Sign-out issue: "+error.message);
