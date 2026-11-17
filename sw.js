@@ -1,5 +1,5 @@
 
-const CACHE = "msvm-os-v1";
+const CACHE = "msvm-os-v2";
 const FILES = [
   "./",
   "./index.html",
