@@ -35,6 +35,6 @@ After a successful manual sync, sign in to MSVM-OS and open Financial Center. Th
 
 ## Dashboard cell mapping
 - Dashboard B5:B10: cash balance, reserved funds, available cash, cleared income, cleared expenses, net cash movement
-- Dashboard E7:E10: pending transaction count, overdue bill count, debt total, savings goal remaining
+- Dashboard F7:F10: pending transaction count, overdue bill count, debt total, savings goal remaining
 
 No transaction-level data is transmitted.
