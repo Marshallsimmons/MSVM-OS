@@ -92,10 +92,10 @@ function syncMSVMFinanceSummary() {
     cleared_income:Number(dash.getRange('B8').getValue())||0,
     cleared_expenses:Number(dash.getRange('B9').getValue())||0,
     net_cash_movement:Number(dash.getRange('B10').getValue())||0,
-    pending_transaction_count:Number(dash.getRange('E7').getValue())||0,
-    overdue_bill_count:Number(dash.getRange('E8').getValue())||0,
-    total_debt:Number(dash.getRange('E9').getValue())||0,
-    savings_goal_remaining:Number(dash.getRange('E10').getValue())||0
+    pending_transaction_count:Number(dash.getRange('F7').getValue())||0,
+    overdue_bill_count:Number(dash.getRange('F8').getValue())||0,
+    total_debt:Number(dash.getRange('F9').getValue())||0,
+    savings_goal_remaining:Number(dash.getRange('F10').getValue())||0
   };
   const response=UrlFetchApp.fetch(endpoint,{method:'post',contentType:'application/json',headers:{'x-msvm-sync-secret':secret},payload:JSON.stringify(payload),muteHttpExceptions:true});
   const code=response.getResponseCode();
