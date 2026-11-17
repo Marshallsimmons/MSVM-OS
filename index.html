@@ -61,12 +61,91 @@
 <section id="knowledge" class="panel"><h2>Knowledge &amp; Education</h2><form id="knowledgeForm"><label>Subject / resource</label><input name="subject" required><label>Key lesson</label><textarea name="lesson"></textarea><button class="action primary">Save learning</button></form><div id="knowledgeList"></div></section>
 <section id="ai" class="panel"><h2>AI Command &amp; Collaboration</h2><p class="muted">This creates handoff text you can copy into ChatGPT or Claude. It does not connect AI accounts automatically.</p><form id="aiForm"><label>Assignment</label><textarea name="assignment" required></textarea><label>Assigned to</label><select name="assignee"><option>ChatGPT</option><option>Claude</option><option>Both — separate review</option></select><label>Expected deliverable / acceptance criteria</label><textarea name="criteria"></textarea><button class="action primary">Create handoff</button></form><div id="aiList"></div></section>
 <section id="legacy" class="panel"><h2>Legacy &amp; Wealth Transfer</h2><form id="legacyForm"><label>Legacy objective</label><input name="objective" required><label>Knowledge, asset, or system to preserve</label><textarea name="details"></textarea><label>Next step</label><input name="next"><button class="action primary">Save legacy objective</button></form><div id="legacyList"></div></section>
+
+<section class="panel" style="display:block">
+<h2>Cloud Sync &amp; Account</h2>
+<p class="muted">Sign in to sync your MSVM records to your private Supabase account. Database access is restricted by your account's row-level security policies.</p>
+<form id="authForm">
+<label>Email</label><input name="email" type="email" autocomplete="username" required>
+<label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+<button class="action primary">Sign in</button>
+</form>
+<div class="toolbar"><button class="action" id="signOut" type="button" style="display:none">Sign out</button></div>
+<p id="cloudStatus" class="muted" role="status">Not connected. Local browser storage remains available.</p>
+<div id="cloudChoices" style="display:none">
+<p>Cloud records already exist. Choose which copy should become the starting point on this device.</p>
+<div class="toolbar"><button class="action primary" id="loadCloud" type="button">Load cloud records</button><button class="action" id="uploadDevice" type="button">Replace cloud with this device</button></div>
+</div>
+</section>
 <section class="panel" style="display:block"><h2>Data controls</h2><p class="muted">Records are stored in this browser on this device. Clearing browser data may erase them. Export backups regularly. This prototype is not a secure multi-user cloud database.</p><div class="toolbar"><button class="action primary" id="export">Export backup (JSON)</button><label class="action" for="importFile">Import backup</label><input id="importFile" type="file" accept="application/json" style="display:none"><button class="action danger" id="clear">Clear all local data</button></div></section>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+
+const SUPABASE_URL="https://igiynbhroctkhgygwsri.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_jlLlBLlhBsCmBjM5uU_PJQ_4CKxTpuW";
+const supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+let cloudUser=null,cloudReady=false,pendingCloudRows=null,syncChain=Promise.resolve();
+const setCloudStatus=(message)=>{document.getElementById("cloudStatus").textContent=message};
+const writeCloud=async()=>{
+ if(!cloudUser) throw new Error("No signed-in user.");
+ const rows=keys.map(module=>({user_id:cloudUser.id,module,record:db[module]}));
+ const {error}=await supabaseClient.from("msvm_records").upsert(rows,{onConflict:"user_id,module"});
+ if(error) throw error;
+};
+const syncCloud=()=>{
+ syncChain=syncChain.then(async()=>{if(cloudUser&&cloudReady){await writeCloud();setCloudStatus("Signed in. All MSVM modules are synced to your cloud account.");}}).catch(error=>{setCloudStatus("Cloud sync issue: "+error.message+" Your latest changes remain saved on this device.");});
+ return syncChain;
+};
+async function handleCloudSession(session){
+ const user=session?.user||null;
+ if(!user){cloudUser=null;cloudReady=false;document.getElementById("signOut").style.display="none";document.getElementById("cloudChoices").style.display="none";setCloudStatus("Not signed in. Your records remain saved on this device.");return;}
+ if(cloudUser?.id===user.id && (cloudReady||pendingCloudRows)) return;
+ cloudUser=user;cloudReady=false;document.getElementById("signOut").style.display="inline-block";
+ document.getElementById("cloudChoices").style.display="none";
+ setCloudStatus("Signed in. Checking your cloud records…");
+ const {data,error}=await supabaseClient.from("msvm_records").select("module,record").eq("user_id",user.id);
+ if(error){setCloudStatus("Could not read cloud records: "+error.message);return;}
+ if(!data||data.length===0){
+   try{await writeCloud();cloudReady=true;setCloudStatus("Connected. Your existing records from this device were copied to your cloud account.");}
+   catch(err){setCloudStatus("Initial cloud backup failed: "+err.message+" Your local records are unchanged.");}
+ }else{
+   pendingCloudRows=data;setCloudStatus("Cloud records found. Choose Load cloud records or Replace cloud with this device.");
+   document.getElementById("cloudChoices").style.display="block";
+ }
+}
+document.getElementById("authForm").addEventListener("submit",async e=>{
+ e.preventDefault();const values=Object.fromEntries(new FormData(e.target));
+ setCloudStatus("Signing in…");
+ const {data,error}=await supabaseClient.auth.signInWithPassword({email:values.email,password:values.password});
+ if(error){setCloudStatus("Sign-in failed: "+error.message);return;}
+ await handleCloudSession(data.session);e.target.reset();
+});
+document.getElementById("signOut").addEventListener("click",async()=>{
+ const {error}=await supabaseClient.auth.signOut();
+ if(error)setCloudStatus("Sign-out issue: "+error.message);
+ else setCloudStatus("Signed out. Local records remain on this device.");
+});
+document.getElementById("loadCloud").addEventListener("click",async()=>{
+ if(!pendingCloudRows||!cloudUser)return;
+ cloudReady=false;const found=Object.fromEntries(pendingCloudRows.map(row=>[row.module,row.record]));
+ keys.forEach(k=>{if(Object.prototype.hasOwnProperty.call(found,k))db[k]=Array.isArray(found[k])?found[k]:[];});
+ keys.forEach(k=>localStorage.setItem("msvm_"+k,JSON.stringify(db[k])));
+ try{await writeCloud();cloudReady=true;pendingCloudRows=null;document.getElementById("cloudChoices").style.display="none";update();setCloudStatus("Cloud records loaded. Missing modules were preserved from this device and added to the cloud.");}
+ catch(err){setCloudStatus("Cloud load completed locally, but sync failed: "+err.message);}
+});
+document.getElementById("uploadDevice").addEventListener("click",async()=>{
+ if(!cloudUser)return;
+ cloudReady=false;setCloudStatus("Uploading this device's records…");
+ try{await writeCloud();cloudReady=true;pendingCloudRows=null;document.getElementById("cloudChoices").style.display="none";setCloudStatus("This device's records now replace the cloud records.");}
+ catch(err){setCloudStatus("Upload failed: "+err.message+" Existing cloud records were not intentionally cleared.");}
+});
+supabaseClient.auth.onAuthStateChange((_event,session)=>{handleCloudSession(session).catch(err=>setCloudStatus("Cloud connection issue: "+err.message));});
+supabaseClient.auth.getSession().then(({data,error})=>{if(error)setCloudStatus("Session check failed: "+error.message);else handleCloudSession(data.session).catch(err=>setCloudStatus("Cloud connection issue: "+err.message));});
+
 const keys=['founder','finance','business','tasks','knowledge','ai','legacy'];
 let db={}; keys.forEach(k=>{try{db[k]=JSON.parse(localStorage.getItem('msvm_'+k)||'[]')}catch{db[k]=[]}});
-const save=()=>keys.forEach(k=>localStorage.setItem('msvm_'+k,JSON.stringify(db[k])));
+const save=()=>{keys.forEach(k=>localStorage.setItem('msvm_'+k,JSON.stringify(db[k])));if(cloudUser&&cloudReady)syncCloud();};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(n)||0);
 function list(id,arr,fields){document.getElementById(id).innerHTML=arr.slice().reverse().map(x=>'<div class="item">'+fields.map(f=>'<div>'+esc(x[f])+'</div>').join('')+'</div>').join('')||'<p class="muted">No entries yet.</p>'}
